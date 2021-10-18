@@ -3,11 +3,16 @@ package helpers
 import (
 	"bytes"
 	"encoding/binary"
+	"log"
 	"strings"
 )
 
 func ReadLabel(bufferWithLabelStarting *bytes.Buffer, fullMessage []byte) (label string) {
-	var parts []string
+	// TODO: can be optimized with cache ?
+	var (
+		parts              []string
+		hadRealLabelBefore bool
+	)
 
 	for {
 		lengthOfName, _ := bufferWithLabelStarting.ReadByte()
@@ -17,8 +22,19 @@ func ReadLabel(bufferWithLabelStarting *bytes.Buffer, fullMessage []byte) (label
 		}
 
 		if lengthOfName > 63 { // Compressed part
+			// The compression scheme allows a domain name in a message to be represented as either:
+			//   - a sequence of labels ending in a zero octet
+			//   - a pointer
+			//   - a sequence of labels ending with a pointer
+
 			_ = bufferWithLabelStarting.UnreadByte()
-			parts = append(parts, readCompressed(bufferWithLabelStarting, fullMessage))
+			compressed := readCompressed(bufferWithLabelStarting, fullMessage)
+			parts = append(parts, compressed)
+
+			if hadRealLabelBefore {
+				break
+			}
+
 			continue
 		}
 
@@ -26,9 +42,11 @@ func ReadLabel(bufferWithLabelStarting *bytes.Buffer, fullMessage []byte) (label
 		_, _ = bufferWithLabelStarting.Read(labelBytes)
 
 		parts = append(parts, string(labelBytes))
+		hadRealLabelBefore = true
 	}
 
 	label = strings.Join(parts, ".")
+	log.Println(label)
 	return
 }
 

@@ -36,7 +36,6 @@ func UnmarshalMessage(data []byte) (message *DNSMessage, err error) {
 	}
 
 	message.Questions, unreadData = UnmarshalQuestions(unreadData, int(header.QDCOUNT))
-
 	message.Answer, unreadData = UnmarshalRecords(unreadData, data, int(header.ANCOUNT))
 	message.Authority, unreadData = UnmarshalRecords(unreadData, data, int(header.NSCOUNT))
 	message.Additional, unreadData = UnmarshalRecords(unreadData, data, int(header.ARCOUNT))
