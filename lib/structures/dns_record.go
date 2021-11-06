@@ -4,6 +4,11 @@ import (
 	"DNSServer/lib/helpers"
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
 )
 
 // RecordType  two octets containing one of the RR TYPE codes.
@@ -28,6 +33,9 @@ const (
 	RecordTypeMINFO // 14 mailbox or mail list information
 	RecordTypeMX    // 15 mail exchange
 	RecordTypeTXT   // 16 text strings
+
+	RecordTypeAAAA = 28
+	RecordTypeOPT  = 41
 )
 
 type RecordClass uint16
@@ -67,37 +75,44 @@ type DNSRecord struct {
 	//                For example, the if the TYPE is A and the CLASS is IN,
 	//                the RDATA field is a 4 octet ARPA Internet address.
 	RDATA []byte
+
+	// Here I store parsed correctly RDATA based on record Type
+	RDataRepresentation string
 }
 
 type marshaledRecordPacket struct {
-	Type     uint16
-	Class    uint16
+	_    byte
+	Type byte
+
+	_     byte
+	Class byte
+
 	TTL      uint32
 	RDLength uint16
 }
 
-//                                1  1  1  1  1  1
-//      0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//    |                                               |
-//    /                                               /
-//    /                      NAME                     /
-//    |                                               |
-//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//    |                      TYPE                     |
-//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//    |                     CLASS                     |
-//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//    |                      TTL                      |
-//    |                                               |
-//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//    |                   RDLENGTH                    |
-//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
-//    /                     RDATA                     /
-//    /                                               /
-//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-
 func (r *DNSRecord) Marshal(namesPositions map[string]int) (res []byte) {
+	//                                1  1  1  1  1  1
+	//      0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+	//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+	//    |                                               |
+	//    /                                               /
+	//    /                      NAME                     /
+	//    |                                               |
+	//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+	//    |                      TYPE                     |
+	//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+	//    |                     CLASS                     |
+	//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+	//    |                      TTL                      |
+	//    |                                               |
+	//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+	//    |                   RDLENGTH                    |
+	//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+	//    /                     RDATA                     /
+	//    /                                               /
+	//    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
 	buffer := new(bytes.Buffer)
 
 	position, ok := namesPositions[r.Name]
@@ -125,29 +140,77 @@ func UnmarshalRecords(recordsStartBytes, fullMessage []byte, recordsCount int) (
 	buffer := bytes.NewBuffer(recordsStartBytes)
 
 	for recordsCount > 0 {
-		name := helpers.ReadLabel(buffer, fullMessage)
+		name, shouldUnreadByte := helpers.ReadLabel(buffer, fullMessage)
 
-		_ = buffer.UnreadByte()
+		if shouldUnreadByte {
+			_ = buffer.UnreadByte()
+		}
+
 		var packet marshaledRecordPacket
-		packetReader := bytes.NewReader(buffer.Next(2 + 2 + 4 + 2))
+
+		foo := make([]byte, 2+2+4+2)
+		_, _ = buffer.Read(foo)
+
+		packetReader := bytes.NewReader(foo)
 		_ = binary.Read(packetReader, binary.BigEndian, &packet)
+
+		log.Println(packet)
 
 		rdata := make([]byte, packet.RDLength)
 
 		_, _ = buffer.Read(rdata)
 
-		records = append(records, &DNSRecord{
+		currentRecord := &DNSRecord{
 			Name:       name,
 			Type:       RecordType(packet.Type),
 			Class:      RecordClass(packet.Class),
 			TimeToLive: packet.TTL,
 			RDLENGTH:   packet.RDLength,
 			RDATA:      rdata,
-		})
+		}
+
+		var rDataRepresentation string
+		switch currentRecord.Type {
+		case RecordTypeA:
+			rDataRepresentation = unmarshalRDataAsIpv4Address(currentRecord)
+		case RecordTypeNS:
+			rDataRepresentation = unmarshalRDataAsNS(currentRecord, fullMessage)
+		case RecordTypeOPT, RecordTypeAAAA:
+		default:
+			fmt.Print(hex.Dump(fullMessage))
+			fmt.Println("--------------")
+			fmt.Println(hex.Dump(recordsStartBytes))
+			fmt.Println("--------------")
+			fmt.Println(hex.Dump(foo))
+			fmt.Println("--------------")
+			fmt.Print(currentRecord.Type)
+			log.Fatal("UNKNOWN TYPE!!")
+			rDataRepresentation = "hello yopta"
+		}
+
+		currentRecord.RDataRepresentation = rDataRepresentation
+		records = append(records, currentRecord)
 
 		recordsCount -= 1
 	}
 
 	unreadData = buffer.Bytes()
 	return
+}
+
+func unmarshalRDataAsIpv4Address(r *DNSRecord) string {
+	numbers := make([]string, 4)
+
+	for i, octet := range r.RDATA {
+		numbers[i] = strconv.Itoa(int(octet))
+	}
+
+	return strings.Join(numbers, ".")
+}
+
+func unmarshalRDataAsNS(r *DNSRecord, fullMessage []byte) string {
+	buffer := bytes.NewBuffer(r.RDATA)
+	name, _ := helpers.ReadLabel(buffer, fullMessage)
+
+	return name
 }

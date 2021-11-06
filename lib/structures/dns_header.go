@@ -5,9 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/bits"
-	"math/rand"
 )
 
 const HeaderLength = 12
@@ -101,31 +99,6 @@ type marshaledHeaderPacket struct {
 	Qdcount, Ancount, Nscount, Arcount uint16
 }
 
-func NewQueryDNSHeader(opcode OpcodeType,
-	RD byte,
-	QDCOUNT uint16,
-	ANCOUNT uint16,
-	NSCOUNT uint16,
-	ARCOUNT uint16) *DNSHeader {
-	randomId := uint16(rand.Intn(math.MaxUint16))
-
-	return &DNSHeader{
-		Id:      randomId,
-		QR:      QRQuery,
-		Opcode:  opcode,
-		AA:      0,
-		TC:      0,
-		RD:      RD,
-		RA:      0,
-		Z:       0,
-		RCODE:   0,
-		QDCOUNT: QDCOUNT,
-		ANCOUNT: ANCOUNT,
-		NSCOUNT: NSCOUNT,
-		ARCOUNT: ARCOUNT,
-	}
-}
-
 func (d *DNSHeader) Marshal() (res []byte) {
 	/*
 			The header contains the following fields:
@@ -208,7 +181,6 @@ func UnmarshalHeader(data []byte) (header *DNSHeader, unreadData []byte, err err
 	}
 
 	unreadData = data[HeaderLength:]
-
 	return
 }
 

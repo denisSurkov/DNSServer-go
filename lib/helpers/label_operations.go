@@ -3,12 +3,10 @@ package helpers
 import (
 	"bytes"
 	"encoding/binary"
-	"log"
 	"strings"
 )
 
-func ReadLabel(bufferWithLabelStarting *bytes.Buffer, fullMessage []byte) (label string) {
-	// TODO: can be optimized with cache ?
+func ReadLabel(bufferWithLabelStarting *bytes.Buffer, fullMessage []byte) (label string, shouldUnreadByte bool) {
 	var (
 		parts              []string
 		hadRealLabelBefore bool
@@ -30,7 +28,7 @@ func ReadLabel(bufferWithLabelStarting *bytes.Buffer, fullMessage []byte) (label
 			_ = bufferWithLabelStarting.UnreadByte()
 			compressed := readCompressed(bufferWithLabelStarting, fullMessage)
 			parts = append(parts, compressed)
-
+			shouldUnreadByte = true
 			if hadRealLabelBefore {
 				break
 			}
@@ -46,7 +44,6 @@ func ReadLabel(bufferWithLabelStarting *bytes.Buffer, fullMessage []byte) (label
 	}
 
 	label = strings.Join(parts, ".")
-	log.Println(label)
 	return
 }
 
@@ -62,6 +59,6 @@ func readCompressed(buffer *bytes.Buffer, fullMessage []byte) (part string) {
 	offset := (indicatorAndOffset << 2) >> 2
 
 	updatedBuffer := bytes.NewBuffer(fullMessage[offset:])
-	part = ReadLabel(updatedBuffer, fullMessage)
+	part, _ = ReadLabel(updatedBuffer, fullMessage)
 	return
 }
