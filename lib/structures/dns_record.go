@@ -4,9 +4,6 @@ import (
 	"DNSServer/lib/helpers"
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
-	"fmt"
-	"log"
 	"strconv"
 	"strings"
 )
@@ -115,15 +112,7 @@ func (r *DNSRecord) Marshal(namesPositions map[string]int) (res []byte) {
 
 	buffer := new(bytes.Buffer)
 
-	position, ok := namesPositions[r.Name]
-	if ok {
-		twoOctets := uint16(0) << 16
-		twoOctets |= uint16(position)
-		_ = binary.Write(buffer, binary.BigEndian, twoOctets)
-	} else {
-		buffer.WriteByte(uint8(len(r.Name)))
-		buffer.WriteString(r.Name)
-	}
+	helpers.WriteLabel(buffer, r.Name)
 
 	_ = binary.Write(buffer, binary.BigEndian, uint16(r.Type))
 	_ = binary.Write(buffer, binary.BigEndian, uint16(r.Class))
@@ -154,10 +143,7 @@ func UnmarshalRecords(recordsStartBytes, fullMessage []byte, recordsCount int) (
 		packetReader := bytes.NewReader(foo)
 		_ = binary.Read(packetReader, binary.BigEndian, &packet)
 
-		log.Println(packet)
-
 		rdata := make([]byte, packet.RDLength)
-
 		_, _ = buffer.Read(rdata)
 
 		currentRecord := &DNSRecord{
@@ -177,15 +163,7 @@ func UnmarshalRecords(recordsStartBytes, fullMessage []byte, recordsCount int) (
 			rDataRepresentation = unmarshalRDataAsNS(currentRecord, fullMessage)
 		case RecordTypeOPT, RecordTypeAAAA:
 		default:
-			fmt.Print(hex.Dump(fullMessage))
-			fmt.Println("--------------")
-			fmt.Println(hex.Dump(recordsStartBytes))
-			fmt.Println("--------------")
-			fmt.Println(hex.Dump(foo))
-			fmt.Println("--------------")
-			fmt.Print(currentRecord.Type)
-			log.Fatal("UNKNOWN TYPE!!")
-			rDataRepresentation = "hello yopta"
+			rDataRepresentation = "not parsed"
 		}
 
 		currentRecord.RDataRepresentation = rDataRepresentation

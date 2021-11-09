@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
+	"math/rand"
 )
 
 const HeaderLength = 12
@@ -92,6 +93,40 @@ type DNSHeader struct {
 	ARCOUNT uint16
 }
 
+func NewDNSHeader(QR RequestType, opcode OpcodeType, AA byte, TC byte, RD byte, RA byte, z byte, RCODE byte, QDCOUNT uint16, ANCOUNT uint16, NSCOUNT uint16, ARCOUNT uint16) *DNSHeader {
+	id := uint16(rand.Uint32())
+	return &DNSHeader{
+		Id:      id,
+		QR:      QR,
+		Opcode:  opcode,
+		AA:      AA,
+		TC:      TC,
+		RD:      RD,
+		RA:      RA,
+		Z:       z,
+		RCODE:   RCODE,
+		QDCOUNT: QDCOUNT,
+		ANCOUNT: ANCOUNT,
+		NSCOUNT: NSCOUNT,
+		ARCOUNT: ARCOUNT,
+	}
+}
+
+func NewDNSQuestionHeader() *DNSHeader {
+	return NewDNSHeader(QRQuery,
+		OpStandardQuery,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0)
+}
+
 type marshaledHeaderPacket struct {
 	Id                                 uint16
 	FirstPartOfFlags                   byte
@@ -131,15 +166,14 @@ func (d *DNSHeader) Marshal() (res []byte) {
 
 	firstFlags = byte(d.QR)
 	firstFlags = helpers.AppendToByteFromRight(firstFlags, 4, byte(d.Opcode))
-	firstFlags = helpers.AppendToByteFromRight(firstFlags, 1, byte(d.AA))
+	firstFlags = helpers.AppendToByteFromRight(firstFlags, 1, d.AA)
 	firstFlags = helpers.AppendToByteFromRight(firstFlags, 1, d.TC)
 	firstFlags = helpers.AppendToByteFromRight(firstFlags, 1, d.RD)
-	firstFlags = helpers.AppendToByteFromRight(firstFlags, 1, d.RA)
-
 	buffer.WriteByte(firstFlags)
 
-	secondFlags = d.Z
-	secondFlags = helpers.AppendToByteFromRight(firstFlags, 4, d.RCODE)
+	secondFlags = d.RA
+	secondFlags = helpers.AppendToByteFromRight(secondFlags, 3, 0)
+	secondFlags = helpers.AppendToByteFromRight(secondFlags, 4, d.RCODE)
 
 	buffer.WriteByte(secondFlags)
 
@@ -161,8 +195,8 @@ func UnmarshalHeader(data []byte) (header *DNSHeader, unreadData []byte, err err
 		fmt.Println(err)
 	}
 
-	qr, opcode, aa, tc, rd, ra := parseFirstPartOfFlags(packet.FirstPartOfFlags)
-	z, rcode := parseSecondPartOfFlags(packet.SecondPartOfFlags)
+	qr, opcode, aa, tc, rd := parseFirstPartOfFlags(packet.FirstPartOfFlags)
+	ra, z, rcode := parseSecondPartOfFlags(packet.SecondPartOfFlags)
 
 	header = &DNSHeader{
 		Id:      packet.Id,
@@ -184,7 +218,7 @@ func UnmarshalHeader(data []byte) (header *DNSHeader, unreadData []byte, err err
 	return
 }
 
-func parseFirstPartOfFlags(firstPartOfFlags byte) (qr, opcode, aa, tc, rd, ra byte) {
+func parseFirstPartOfFlags(firstPartOfFlags byte) (qr, opcode, aa, tc, rd byte) {
 	reversed := bits.Reverse8(firstPartOfFlags)
 
 	qr, reversed = helpers.ReadLastNBitsAndShift(reversed, 1)
@@ -192,13 +226,14 @@ func parseFirstPartOfFlags(firstPartOfFlags byte) (qr, opcode, aa, tc, rd, ra by
 	aa, reversed = helpers.ReadLastNBitsAndShift(reversed, 1)
 	tc, reversed = helpers.ReadLastNBitsAndShift(reversed, 1)
 	rd, reversed = helpers.ReadLastNBitsAndShift(reversed, 1)
-	ra, _ = helpers.ReadLastNBitsAndShift(reversed, 1)
 
 	return
 }
 
-func parseSecondPartOfFlags(secondPartOfFlags byte) (z, rcode byte) {
+func parseSecondPartOfFlags(secondPartOfFlags byte) (ra, z, rcode byte) {
 	reversed := bits.Reverse8(secondPartOfFlags)
+
+	ra, reversed = helpers.ReadLastNBitsAndShift(reversed, 1)
 	z, reversed = helpers.ReadLastNBitsAndShift(reversed, 3)
 	rcode, _ = helpers.ReadLastNBitsAndShift(reversed, 4)
 

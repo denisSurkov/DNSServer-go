@@ -13,6 +13,16 @@ type DNSMessage struct {
 	Additional []*DNSRecord
 }
 
+func NewDNSMessage(header *DNSHeader, questions []*DNSQuestion, answer []*DNSRecord, authority []*DNSRecord, additional []*DNSRecord) *DNSMessage {
+	return &DNSMessage{Header: header, Questions: questions, Answer: answer, Authority: authority, Additional: additional}
+}
+
+func NewQueryDNSMessage(questions ...*DNSQuestion) *DNSMessage {
+	header := NewDNSQuestionHeader()
+	header.QDCOUNT = uint16(len(questions))
+	return NewDNSMessage(header, questions, nil, nil, nil)
+}
+
 func (m *DNSMessage) Marshal() (res []byte) {
 	buffer := new(bytes.Buffer)
 	namePositions := make(map[string]int)
@@ -24,13 +34,13 @@ func (m *DNSMessage) Marshal() (res []byte) {
 		buffer.Write(question.Marshal())
 	}
 
-	//for _, answer := range m.Answer {
-	//	buffer.Write(answer.Marshal(namePositions))
-	//}
-	//
-	//for _, additional := range m.Additional {
-	//	buffer.Write(additional.Marshal(namePositions))
-	//}
+	for _, answer := range m.Answer {
+		buffer.Write(answer.Marshal(namePositions))
+	}
+
+	for _, additional := range m.Additional {
+		buffer.Write(additional.Marshal(namePositions))
+	}
 
 	res = buffer.Bytes()
 	return

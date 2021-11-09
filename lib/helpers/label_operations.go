@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+func WriteLabel(buffer *bytes.Buffer, label string) {
+	labels := strings.Split(label, ".")
+	for _, label := range labels {
+		buffer.WriteByte(uint8(len(label)))
+		buffer.WriteString(label)
+	}
+	buffer.WriteByte(0)
+}
+
 func ReadLabel(bufferWithLabelStarting *bytes.Buffer, fullMessage []byte) (label string, shouldUnreadByte bool) {
 	var (
 		parts              []string

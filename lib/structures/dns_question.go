@@ -70,6 +70,10 @@ type DNSQuestion struct {
 	QClass QClass
 }
 
+func NewDNSQuestion(QName string, QType QType, QClass QClass) *DNSQuestion {
+	return &DNSQuestion{QName: QName, QType: QType, QClass: QClass}
+}
+
 type marshaledQuestionPacket struct {
 	QType  uint16
 	QClass uint16

@@ -2,129 +2,100 @@ package lib
 
 import (
 	"DNSServer/lib/structures"
-	"bufio"
 	"log"
 	"net"
-	"time"
+	"sync"
 )
 
+var sendMutex sync.Mutex
+
 func Resolve(incomingRequest *IncomingRequest, conn net.PacketConn) {
-	foundAnswers, lastMessage, nextServersToAsk := innerResolve(incomingRequest, RootIPServers...)
+	// dig sends weird (name Root, type OPT) stuff, so I ignore it
+	incomingRequest.DNSMessage.Header.ARCOUNT = 0
+	incomingRequest.DNSMessage.Additional = nil
 
-	for !foundAnswers {
-		foundAnswers, lastMessage, nextServersToAsk = innerResolve(incomingRequest, nextServersToAsk...)
-	}
+	answer := resolveQueryDNS(incomingRequest.DNSMessage)
+	makeAnswerLookLikeThisDNSServerSendIt(answer, incomingRequest.DNSMessage)
 
-	log.Printf("found! %s", lastMessage)
-	_, _ = conn.WriteTo(lastMessage.Marshal(), incomingRequest.Address)
+	sendMutex.Lock()
+	_, _ = conn.WriteTo(answer.Marshal(), incomingRequest.Address)
+	sendMutex.Unlock()
 }
 
-func innerResolve(baseIncomingRequest *IncomingRequest, nextServersToAsk ...string) (
-	foundAnswers bool, lastReceivedMsg *structures.DNSMessage, nextServersToAskAgain []string) {
-	baseIncomingRequest.DNSMessage.Header.ARCOUNT = 0 // TODO: fix it
-	marshaledIncomingRequest := baseIncomingRequest.DNSMessage.Marshal()
+func resolveQueryDNS(queryMessage *structures.DNSMessage) *structures.DNSMessage {
+	foundAnswer, lastMessage := askDNS(queryMessage, RootIPServers...)
 
-	_, ans, succeeded := tryToRetrieveDNSDataFromServers(marshaledIncomingRequest, 1, "udp", nextServersToAsk...)
-
-	if !succeeded {
-		log.Fatalf("failed to retrieve dns data from servers")
+	for !foundAnswer {
+		nextServersToAsk := collectNamespaceIp(lastMessage)
+		foundAnswer, lastMessage = askDNS(queryMessage, nextServersToAsk...)
 	}
 
-	msg, err := structures.UnmarshalMessage(ans)
+	return lastMessage
+}
 
+func askDNS(queryMessage *structures.DNSMessage, serversToAsk ...string) (
+	foundAnswers bool, lastReceivedMsg *structures.DNSMessage) {
+	marshaledIncomingRequest := queryMessage.Marshal()
+
+	_, ans, succeeded := tryToRetrieveDNSDataFromServers(marshaledIncomingRequest, 1, "udp", serversToAsk...)
+	if !succeeded {
+		log.Fatalf("Failed to receive dns data from all servers")
+	}
+
+	lastReceivedMsg, err := structures.UnmarshalMessage(ans)
 	if err != nil {
 		log.Fatalf("error while unmarshallind root answer err = %s", err)
 	}
 
-	if msg.Header.TC == 1 {
-		log.Println("message is to big, have to make TCP call")
-		retrievedFrom, data, succeeded := tryToRetrieveDNSDataFromServers(marshaledIncomingRequest, 1, "tcp", nextServersToAsk...)
+	// for some reason, dns servers declined to use tcp..
+	// i always got EOF while making requests over tcp
 
-		if !succeeded {
-			log.Fatalf("didnt succeed with retrieving data")
-		}
+	//if msg.Header.TC == 1 {
+	//	log.Println("message is to big, have to make TCP call")
+	//	retrievedFrom, data, succeeded := tryToRetrieveDNSDataFromServers(marshaledIncomingRequest, 1, "tcp", serversToAsk...)
+	//
+	//	if !succeeded {
+	//		log.Fatalf("didnt succeed with retrieving data")
+	//	}
+	//
+	//	log.Printf("retrieved from %s", retrievedFrom)
+	//	msg, _ = structures.UnmarshalMessage(data)
+	//}
 
-		log.Printf("retrieved from %s", retrievedFrom)
-		msg, _ = structures.UnmarshalMessage(data)
-	}
-
-	if msg.Header.ANCOUNT >= baseIncomingRequest.DNSMessage.Header.QDCOUNT {
+	if lastReceivedMsg.Header.ANCOUNT >= queryMessage.Header.QDCOUNT {
 		log.Println("found full answer count for incoming questions count")
 		foundAnswers = true
-		lastReceivedMsg = msg
 		return
 	}
 
-	log.Printf("answer is not full, checking another, msg %d", msg.Header.ANCOUNT)
-	nsWithIps := collectAllIPAuthorityNSFromAdditional(msg)
-
-	for ns, ip := range nsWithIps {
-		if len(ip) == 0 {
-			continue
-		}
-		log.Printf("adding new server name=%s, ip=%s to ask", ns, ip)
-		nextServersToAskAgain = append(nextServersToAskAgain, ip)
-	}
-
+	log.Printf("answer count %d is lower than query message", lastReceivedMsg.Header.ANCOUNT)
 	foundAnswers = false
 	return
 }
 
-func tryToRetrieveDNSDataFromServers(
-	message []byte,
-	attemptCountForOne int,
-	dialType string,
-	servers ...string) (
-	retrievedFromServer string,
-	data []byte,
-	succeeded bool,
-) {
+func collectNamespaceIp(fromMessage *structures.DNSMessage) (namespaceIp []string) {
+	nsWithIps := collectAllIPAuthorityNSFromAdditional(fromMessage)
 
-	log.Println(len(servers))
-	for _, server := range servers {
-		currentAttempt := 1
+	var allNamespaces []string
+	for ns, ip := range nsWithIps {
+		allNamespaces = append(allNamespaces, ns)
 
-		for currentAttempt <= attemptCountForOne {
-			log.Printf("making %s call to server %s", dialType, server)
+		if len(ip) == 0 {
+			continue
+		}
 
-			data, err := makeUDPCallDNS(server, dialType, message)
-			if err != nil {
-				log.Printf("error %s while trying to make %s call for server %s, attempt %d",
-					err, dialType, server, currentAttempt)
-				currentAttempt += 1
-				continue
-			}
+		log.Printf("adding new server name=%s, ip=%s to ask", ns, ip)
+		namespaceIp = append(namespaceIp, ip)
+	}
 
-			log.Printf("succeded making %s call to server %s", dialType, server)
-			return server, data, true
+	if namespaceIp == nil {
+		nsWithIps = retrieveNameserversIps(allNamespaces[0])
+
+		for _, ip := range nsWithIps {
+			namespaceIp = append(namespaceIp, ip)
 		}
 	}
 
-	return "", nil, false
-}
-
-func makeUDPCallDNS(ipAddressWithoutPort, dialType string, message []byte) (buffer []byte, err error) {
-	buffer = make([]byte, 1048)
-
-	ipAddressWithCorrectPort := ipAddressWithoutPort + ":53"
-	conn, err := net.Dial(dialType, ipAddressWithCorrectPort)
-
-	if err != nil {
-		return
-	}
-
-	defer func() {
-		_ = conn.Close()
-	}()
-
-	_ = conn.SetWriteDeadline(time.Now().Add(time.Second * 3))
-	_, err = conn.Write(message)
-
-	if err != nil {
-		return
-	}
-
-	_, err = bufio.NewReader(conn).Read(buffer)
 	return
 }
 
@@ -132,17 +103,17 @@ func collectAllIPAuthorityNSFromAdditional(fromMessage *structures.DNSMessage) m
 	nsNamesWithIps := make(map[string]string)
 
 	for _, authorityNsRecord := range fromMessage.Authority {
-		nsNamesWithIps[authorityNsRecord.RDataRepresentation] = ""
-		log.Println(authorityNsRecord.RDataRepresentation)
+		if authorityNsRecord.Type == structures.RecordTypeNS &&
+			authorityNsRecord.Class == structures.RecordClassIN {
+			nsNamesWithIps[authorityNsRecord.RDataRepresentation] = ""
+		}
 	}
 
 	for _, additionalRecord := range fromMessage.Additional {
 		if additionalRecord.Type == structures.RecordTypeA &&
 			additionalRecord.Class == structures.RecordClassIN {
 
-			log.Println(additionalRecord.Name)
 			_, ok := nsNamesWithIps[additionalRecord.Name]
-			log.Println(ok)
 			if !ok {
 				continue
 			}
@@ -152,4 +123,33 @@ func collectAllIPAuthorityNSFromAdditional(fromMessage *structures.DNSMessage) m
 	}
 
 	return nsNamesWithIps
+}
+
+func retrieveNameserversIps(nameserversToRetrieve ...string) map[string]string {
+	var nsNamesWithIps = make(map[string]string)
+
+	for _, name := range nameserversToRetrieve {
+		// https://stackoverflow.com/a/4083071
+		// "No one support multiply questions in DNS Message today"
+
+		currentQuestion := structures.NewDNSQuestion(name, structures.QTypeA, structures.QClassIN)
+		message := structures.NewQueryDNSMessage(currentQuestion)
+
+		answerMessage := resolveQueryDNS(message)
+
+		for _, answer := range answerMessage.Answer {
+			nsNamesWithIps[answer.Name] = answer.RDataRepresentation
+		}
+	}
+
+	return nsNamesWithIps
+}
+
+func makeAnswerLookLikeThisDNSServerSendIt(answer *structures.DNSMessage,
+	originalMessage *structures.DNSMessage) {
+	answer.Header.Id = originalMessage.Header.Id
+	answer.Header.AA = 0
+	answer.Header.RA = 1
+	answer.Header.RD = originalMessage.Header.RD
+	answer.Header.QR = structures.QRResponse
 }
