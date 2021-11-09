@@ -8,9 +8,8 @@
 ```
 go mod download
 go build 
-./dnsServer
+sudo ./DNSServer
 ```
-
 Для выполнения спросит root (запускается на порту 53, как и все dns сервера)
 
 ## При выполнении использовались 
