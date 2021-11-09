@@ -8,6 +8,7 @@ import (
 )
 
 var sendMutex sync.Mutex
+var cache = structures.NewQueryCache()
 
 func Resolve(incomingRequest *IncomingRequest, conn net.PacketConn) {
 	// dig sends weird (name Root, type OPT) stuff, so I ignore it
@@ -23,6 +24,12 @@ func Resolve(incomingRequest *IncomingRequest, conn net.PacketConn) {
 }
 
 func resolveQueryDNS(queryMessage *structures.DNSMessage) *structures.DNSMessage {
+	answers, cacheFound := askCache(queryMessage)
+	log.Printf("asked cache? %t", cacheFound)
+	if cacheFound {
+		return structures.NewAnswerDNSMessage(queryMessage.Questions, answers)
+	}
+
 	foundAnswer, lastMessage := askDNS(queryMessage, RootIPServers...)
 
 	for !foundAnswer {
@@ -30,7 +37,19 @@ func resolveQueryDNS(queryMessage *structures.DNSMessage) *structures.DNSMessage
 		foundAnswer, lastMessage = askDNS(queryMessage, nextServersToAsk...)
 	}
 
+	log.Println("adding cache")
+	setCache(queryMessage, lastMessage)
 	return lastMessage
+}
+
+func askCache(queryMessage *structures.DNSMessage) ([]*structures.DNSRecord, bool) {
+	question := queryMessage.Questions[0]
+	return cache.Get(question)
+}
+
+func setCache(originalMessage *structures.DNSMessage, answerMessage *structures.DNSMessage) {
+	question := originalMessage.Questions[0]
+	cache.Set(question, answerMessage.Answer)
 }
 
 func askDNS(queryMessage *structures.DNSMessage, serversToAsk ...string) (

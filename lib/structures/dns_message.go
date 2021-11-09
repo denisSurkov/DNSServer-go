@@ -23,6 +23,13 @@ func NewQueryDNSMessage(questions ...*DNSQuestion) *DNSMessage {
 	return NewDNSMessage(header, questions, nil, nil, nil)
 }
 
+func NewAnswerDNSMessage(questions []*DNSQuestion, answers []*DNSRecord) *DNSMessage {
+	header := NewDNSAnswerHeader()
+	header.QDCOUNT = uint16(len(questions))
+	header.ANCOUNT = uint16(len(answers))
+	return NewDNSMessage(header, questions, answers, nil, nil)
+}
+
 func (m *DNSMessage) Marshal() (res []byte) {
 	buffer := new(bytes.Buffer)
 	namePositions := make(map[string]int)

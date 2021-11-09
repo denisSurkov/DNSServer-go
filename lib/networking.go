@@ -53,9 +53,7 @@ func makeNetDNSCall(ipAddressWithoutPort, dialType string, message []byte) (buff
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
-	n, err := conn.Write(message)
-	log.Println(n, len(message))
-
+	_, err = conn.Write(message)
 	if err != nil {
 		log.Printf("error while writing as %s to %s, error %s", dialType, ipAddressWithCorrectPort, err)
 		return
@@ -63,8 +61,7 @@ func makeNetDNSCall(ipAddressWithoutPort, dialType string, message []byte) (buff
 
 	if dialType == "udp" {
 		buffer = make([]byte, 1024)
-		n, err = conn.Read(buffer)
-		log.Println(dialType, n, err)
+		_, err = conn.Read(buffer)
 	} else {
 		tcpBuffer := bytes.NewBuffer(make([]byte, 1024))
 		n := 1025
@@ -72,7 +69,6 @@ func makeNetDNSCall(ipAddressWithoutPort, dialType string, message []byte) (buff
 		for n >= 1024 {
 			tempBuff := make([]byte, 1024)
 			n, err = conn.Read(tempBuff)
-			log.Println(dialType, n, err)
 			tcpBuffer.Write(tempBuff)
 			totalLength += n
 			tcpBuffer.Grow(1024)

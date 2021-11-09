@@ -127,6 +127,21 @@ func NewDNSQuestionHeader() *DNSHeader {
 		0)
 }
 
+func NewDNSAnswerHeader() *DNSHeader {
+	return NewDNSHeader(QRResponse,
+		OpStandardQuery,
+		0,
+		0,
+		0,
+		1,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0)
+}
+
 type marshaledHeaderPacket struct {
 	Id                                 uint16
 	FirstPartOfFlags                   byte
